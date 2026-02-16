@@ -21,6 +21,41 @@ C++トランスパイラ - 不要なコピー操作をmoveに自動変換して�
 - LLVM/Clang (LibToolingを使用)
 - Google Test (テスト用、オプション)
 
+### 依存関係のインストール
+
+#### macOS (Homebrew)
+
+```bash
+# CMakeのインストール
+brew install cmake
+
+# LLVMのインストール（Clang LibToolingを含む）
+brew install llvm
+
+# Google Testのインストール（オプション、テスト用）
+brew install googletest
+```
+
+インストール後、LLVMのパスを環境変数に設定する必要がある場合があります：
+
+```bash
+export LLVM_DIR=$(brew --prefix llvm)/lib/cmake/llvm
+export Clang_DIR=$(brew --prefix llvm)/lib/cmake/clang
+```
+
+#### Linux (Ubuntu/Debian)
+
+```bash
+sudo apt-get update
+sudo apt-get install cmake llvm-dev clang-dev libclang-dev
+```
+
+#### Linux (Fedora/RHEL)
+
+```bash
+sudo dnf install cmake llvm-devel clang-devel
+```
+
 ## ビルド方法
 
 ```bash

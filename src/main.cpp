@@ -58,10 +58,14 @@ public:
         } else {
             // No changes made, write original file
             const SourceManager& SM = getCompilerInstance().getSourceManager();
-            const FileEntry* FE = SM.getFileEntryForID(SM.getMainFileID());
+            clang::FileID mainFileID = SM.getMainFileID();
+            const FileEntry* FE = SM.getFileEntryForID(mainFileID);
             if (FE) {
-                std::ifstream input(SM.getFileEntryForID(SM.getMainFileID())->getName().str());
-                OS << input.rdbuf();
+                std::string filename = FE->getName().str();
+                std::ifstream input(filename);
+                if (input.is_open()) {
+                    OS << input.rdbuf();
+                }
             }
         }
         
