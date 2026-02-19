@@ -52,6 +52,28 @@ protected:
         return std::system(cmd.str().c_str());
     }
 
+    static std::string detectCompiler() {
+        if (std::system("command -v clang++ >/dev/null 2>&1") == 0) {
+            return "clang++";
+        }
+        if (std::system("command -v g++ >/dev/null 2>&1") == 0) {
+            return "g++";
+        }
+        return "";
+    }
+
+    static int compileSource(const fs::path& sourcePath) {
+        const std::string compiler = detectCompiler();
+        if (compiler.empty()) {
+            return -1;
+        }
+
+        std::ostringstream cmd;
+        cmd << compiler << " -std=c++17 -fsyntax-only "
+            << "\"" << sourcePath.string() << "\"";
+        return std::system(cmd.str().c_str());
+    }
+
     static std::string optimizerBinary() {
 #ifdef MOVE_OPTIMIZER_BIN
         return MOVE_OPTIMIZER_BIN;
@@ -128,6 +150,26 @@ std::string makeString() {
     ASSERT_EQ(runOptimizer(inPath, outPath), 0);
     const std::string out = readFile(outPath.string());
     EXPECT_EQ(out.find("return std::move(local);"), std::string::npos);
+}
+
+TEST_F(MoveOptimizerTest, TransformedOutputCompiles) {
+    const std::string input = R"cpp(
+#include <string>
+void consume(std::string s) {}
+std::string process(std::string value) {
+    consume(value);
+    return value;
+}
+)cpp";
+    const fs::path inPath = writeTestFile("compile_input.cpp", input);
+    const fs::path outPath = testDir_ / "compile_output.cpp";
+
+    ASSERT_EQ(runOptimizer(inPath, outPath), 0);
+    const int compileResult = compileSource(outPath);
+    if (compileResult == -1) {
+        GTEST_SKIP() << "No C++ compiler available for syntax check";
+    }
+    EXPECT_EQ(compileResult, 0);
 }
 
 int main(int argc, char** argv) {
