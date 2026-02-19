@@ -37,14 +37,9 @@ public:
     explicit ASTVisitor(clang::ASTContext& context);
     
     // Visit declarations
-    bool VisitVarDecl(clang::VarDecl* decl);
     bool VisitFunctionDecl(clang::FunctionDecl* decl);
-    bool VisitCXXConstructExpr(clang::CXXConstructExpr* expr);
     bool VisitCallExpr(clang::CallExpr* expr);
     bool VisitReturnStmt(clang::ReturnStmt* stmt);
-    bool VisitBinaryOperator(clang::BinaryOperator* op);
-    bool VisitDeclRefExpr(clang::DeclRefExpr* expr);
-    bool VisitStmt(clang::Stmt* stmt);
     
     // Get collected transformations
     const std::vector<Transformation>& getTransformations() const { return transformations_; }
@@ -54,24 +49,16 @@ private:
     clang::ASTContext& context_;
     std::vector<Transformation> transformations_;
     
-    // Variable usage tracking
-    struct VariableUsage {
-        clang::VarDecl* var;
-        std::vector<clang::Stmt*> uses;
-        clang::Stmt* lastUse;
-        bool isModified;
-    };
-    std::map<clang::VarDecl*, VariableUsage> variableUsages_;
     clang::FunctionDecl* currentFunction_;
+    std::map<const clang::VarDecl*, clang::SourceLocation> lastUseLocations_;
     
     // Helper methods
     bool isCopyOperation(clang::Expr* expr);
-    bool canBeMoved(clang::Expr* expr);
-    bool isLastUse(clang::VarDecl* var, clang::Stmt* currentStmt);
     bool hasMoveConstructor(clang::QualType type);
-    bool isSafeToMove(clang::Expr* expr, clang::Stmt* context);
-    void trackVariableUsage(clang::VarDecl* var, clang::Stmt* stmt);
-    std::string getSourceText(clang::SourceRange range);
+    bool isSafeToMove(clang::Expr* expr, const clang::Stmt* context);
+    bool isLastUseInCurrentFunction(const clang::VarDecl* var, clang::SourceLocation useLoc) const;
+    void collectLastUsesForCurrentFunction();
+    static clang::Expr* ignoreImplicit(clang::Expr* expr);
 };
 
 } // namespace move_optimizer
