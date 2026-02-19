@@ -7,9 +7,12 @@
 #include <clang/AST/Stmt.h>
 #include <clang/AST/Decl.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/Analysis/CFG.h>
 #include <vector>
 #include <string>
 #include <map>
+#include <memory>
+#include <unordered_map>
 
 namespace move_optimizer {
 
@@ -46,18 +49,30 @@ public:
     void clearTransformations() { transformations_.clear(); }
     
 private:
+    struct UsePosition {
+        unsigned blockId;
+        unsigned elementIndex;
+        clang::SourceLocation location;
+    };
+
     clang::ASTContext& context_;
     std::vector<Transformation> transformations_;
     
     clang::FunctionDecl* currentFunction_;
-    std::map<const clang::VarDecl*, clang::SourceLocation> lastUseLocations_;
+    std::unique_ptr<clang::CFG> currentFunctionCfg_;
+    std::map<const clang::VarDecl*, std::vector<UsePosition>> variableUsePositions_;
+    std::unordered_map<unsigned, const clang::CFGBlock*> cfgBlocksById_;
     
     // Helper methods
     bool isCopyOperation(clang::Expr* expr);
     bool hasMoveConstructor(clang::QualType type);
     bool isSafeToMove(clang::Expr* expr, const clang::Stmt* context);
     bool isLastUseInCurrentFunction(const clang::VarDecl* var, clang::SourceLocation useLoc) const;
-    void collectLastUsesForCurrentFunction();
+    void collectUsesForCurrentFunction();
+    bool canOccurAfter(const UsePosition& current, const UsePosition& candidate) const;
+    bool isReachable(const clang::CFGBlock* from, const clang::CFGBlock* to) const;
+    bool blockCanReachItself(const clang::CFGBlock* block) const;
+    const UsePosition* findUsePosition(const clang::VarDecl* var, clang::SourceLocation useLoc) const;
     static clang::Expr* ignoreImplicit(clang::Expr* expr);
 };
 
