@@ -3,6 +3,8 @@
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <clang/Basic/SourceManager.h>
 #include <clang/AST/Expr.h>
+#include <clang/Lex/Lexer.h>
+#include <llvm/ADT/StringRef.h>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -11,7 +13,7 @@ namespace move_optimizer {
 
 CodeTransformer::CodeTransformer(clang::ASTContext& context, 
                                   clang::Rewriter& rewriter)
-    : context_(context), rewriter_(rewriter) {
+    : context_(context), rewriter_(rewriter), insertedMoveInFile_(false), utilityHeaderEnsured_(false) {
 }
 
 bool CodeTransformer::applyTransformation(const Transformation& transformation) {
@@ -24,9 +26,6 @@ bool CodeTransformer::applyTransformation(const Transformation& transformation) 
     if (isAlreadyMoved(transformation.range)) {
         return true; // Already optimized
     }
-    
-    clang::SourceManager& sm = context_.getSourceManager();
-    clang::LangOptions langOpts;
     
     bool success = false;
     switch (transformation.type) {
@@ -50,12 +49,17 @@ bool CodeTransformer::applyTransformation(const Transformation& transformation) 
 bool CodeTransformer::applyTransformations(
     const std::vector<Transformation>& transformations) {
     bool success = true;
+    insertedMoveInFile_ = false;
     
     // Apply transformations in reverse order to preserve source locations
     for (auto it = transformations.rbegin(); it != transformations.rend(); ++it) {
         if (!applyTransformation(*it)) {
             success = false;
         }
+    }
+
+    if (insertedMoveInFile_ && !ensureUtilityHeader()) {
+        success = false;
     }
     
     return success;
@@ -87,24 +91,16 @@ bool CodeTransformer::insertMove(clang::SourceLocation loc,
 
 bool CodeTransformer::wrapWithMove(clang::SourceRange range) {
     clang::SourceManager& sm = context_.getSourceManager();
-    clang::LangOptions langOpts;
-    
+    const auto& langOpts = context_.getLangOpts();
+
+    if (!range.isValid()) {
+        return false;
+    }
+
     clang::SourceLocation begin = range.getBegin();
     clang::SourceLocation end = range.getEnd();
-    
-    // Get the text to wrap
-    bool invalid = false;
-    const char* start = sm.getCharacterData(begin, &invalid);
-    if (invalid) {
-        return false;
-    }
-    
-    const char* finish = sm.getCharacterData(end, &invalid);
-    if (invalid) {
-        return false;
-    }
-    
-    std::string originalText(start, finish - start);
+    std::string originalText = clang::Lexer::getSourceText(
+        clang::CharSourceRange::getTokenRange(begin, end), sm, langOpts).str();
     
     // Check if already wrapped with std::move
     if (originalText.find("std::move(") == 0) {
@@ -115,6 +111,7 @@ bool CodeTransformer::wrapWithMove(clang::SourceRange range) {
     std::string moveCode = "std::move(";
     rewriter_.InsertTextBefore(begin, moveCode);
     rewriter_.InsertTextAfterToken(end, ")");
+    insertedMoveInFile_ = true;
     
     return true;
 }
@@ -159,20 +156,14 @@ bool CodeTransformer::validateTransformation(const Transformation& transformatio
 
 bool CodeTransformer::isAlreadyMoved(clang::SourceRange range) {
     clang::SourceManager& sm = context_.getSourceManager();
-    clang::LangOptions langOpts;
-    
-    bool invalid = false;
-    const char* start = sm.getCharacterData(range.getBegin(), &invalid);
-    if (invalid) {
+    const auto& langOpts = context_.getLangOpts();
+
+    if (!range.isValid()) {
         return false;
     }
-    
-    const char* finish = sm.getCharacterData(range.getEnd(), &invalid);
-    if (invalid) {
-        return false;
-    }
-    
-    std::string text(start, finish - start);
+
+    std::string text = clang::Lexer::getSourceText(
+        clang::CharSourceRange::getTokenRange(range), sm, langOpts).str();
     
     // Check if already wrapped with std::move
     size_t pos = text.find("std::move(");
@@ -221,6 +212,68 @@ bool CodeTransformer::isValidMoveTarget(clang::Expr* expr) {
         return false; // Cannot move const objects
     }
     
+    return true;
+}
+
+bool CodeTransformer::ensureUtilityHeader() {
+    if (utilityHeaderEnsured_) {
+        return true;
+    }
+
+    clang::SourceManager& sm = context_.getSourceManager();
+    clang::FileID mainFileId = sm.getMainFileID();
+    llvm::StringRef buffer = sm.getBufferData(mainFileId);
+    if (buffer.empty()) {
+        return false;
+    }
+
+    if (buffer.contains("#include <utility>") || buffer.contains("#include \"utility\"")) {
+        utilityHeaderEnsured_ = true;
+        return true;
+    }
+
+    size_t offset = 0;
+    size_t insertOffset = 0;
+    bool hasIncludes = false;
+
+    while (offset < buffer.size()) {
+        size_t lineEnd = buffer.find('\n', offset);
+        if (lineEnd == llvm::StringRef::npos) {
+            lineEnd = buffer.size();
+        } else {
+            ++lineEnd;
+        }
+
+        llvm::StringRef line = buffer.slice(offset, lineEnd).trim();
+        if (line.startswith("#include")) {
+            hasIncludes = true;
+            insertOffset = lineEnd;
+            offset = lineEnd;
+            continue;
+        }
+
+        if (line.empty() || line.startswith("//") || line.startswith("/*") || line.startswith("*")) {
+            offset = lineEnd;
+            continue;
+        }
+
+        if (line.startswith("#pragma once")) {
+            insertOffset = lineEnd;
+            offset = lineEnd;
+            continue;
+        }
+
+        if (hasIncludes) {
+            break;
+        }
+
+        offset = lineEnd;
+    }
+
+    clang::SourceLocation insertLoc = sm.getLocForStartOfFile(mainFileId).getLocWithOffset(insertOffset);
+    const char* includeText = hasIncludes ? "#include <utility>\n" : "#include <utility>\n\n";
+    rewriter_.InsertTextBefore(insertLoc, includeText);
+    utilityHeaderEnsured_ = true;
     return true;
 }
 

@@ -30,6 +30,8 @@ private:
     clang::ASTContext& context_;
     clang::Rewriter& rewriter_;
     std::vector<clang::SourceRange> appliedRanges_;
+    bool insertedMoveInFile_;
+    bool utilityHeaderEnsured_;
     
     // Helper methods
     bool insertMove(clang::SourceLocation loc, clang::SourceRange range);
@@ -37,6 +39,7 @@ private:
     std::string generateMoveCode(const Transformation& transformation);
     bool checkOverlap(clang::SourceRange range);
     bool isValidMoveTarget(clang::Expr* expr);
+    bool ensureUtilityHeader();
 };
 
 } // namespace move_optimizer
