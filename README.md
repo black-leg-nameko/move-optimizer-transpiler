@@ -91,14 +91,12 @@ make
 ### Before (最適化前)
 
 ```cpp
-Widget createWidget() {
-    Widget w;
-    return w;  // コピーが発生
+Widget passthrough(Widget input) {
+    return input;  // コピーが発生
 }
 
 void example() {
     Widget w1;
-    Widget w2 = w1;  // コピーが発生
     processWidget(w1);  // コピーが発生
 }
 ```
@@ -106,14 +104,12 @@ void example() {
 ### After (最適化後)
 
 ```cpp
-Widget createWidget() {
-    Widget w;
-    return std::move(w);  // moveに変換
+Widget passthrough(Widget input) {
+    return std::move(input);  // moveに変換
 }
 
 void example() {
     Widget w1;
-    Widget w2 = std::move(w1);  // moveに変換
     processWidget(std::move(w1));  // moveに変換
 }
 ```
@@ -124,17 +120,16 @@ void example() {
 
 1. **AST Visitor** (`ast_visitor.h/cpp`)
    - Clang ASTを走査してコピー操作を検出
-   - 関数の戻り値、変数代入、関数引数を解析
+   - 関数の戻り値、関数引数を解析
 
 2. **Move可能性解析** (`ast_visitor.cpp`)
-   - 変数の使用状況を追跡
-   - 最後の使用箇所を特定
+   - CFGベースで変数使用を追跡
+   - 分岐/ループを考慮した最終使用箇所を推定
    - コピーが不要かmove可能かを判定
 
 3. **コード変換エンジン** (`code_transformer.h/cpp`)
    - `std::move()`の自動挿入
-   - コピーコンストラクタ呼び出しをmoveコンストラクタに変換
-   - 戻り値の最適化（RVO/NRVOの活用）
+   - `<utility>`ヘッダの自動補完
 
 4. **安全性チェック** (`code_transformer.cpp`)
    - 変換後のコードのセマンティクス検証
