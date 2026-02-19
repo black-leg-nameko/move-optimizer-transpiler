@@ -8,6 +8,7 @@
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/raw_ostream.h>
 #include <iostream>
 #include <fstream>
@@ -20,6 +21,10 @@ static llvm::cl::OptionCategory MoveOptimizerCategory("Move Optimizer Options");
 static llvm::cl::opt<std::string> OutputFile("o", 
     llvm::cl::desc("Output file path"),
     llvm::cl::value_desc("filename"),
+    llvm::cl::cat(MoveOptimizerCategory));
+static llvm::cl::opt<std::string> OutputDir("out-dir",
+    llvm::cl::desc("Output directory for multi-file mode"),
+    llvm::cl::value_desc("directory"),
     llvm::cl::cat(MoveOptimizerCategory));
 
 class MoveOptimizerAction : public ASTFrontendAction {
@@ -38,9 +43,27 @@ public:
         }
         
         // Get the output file name
-        std::string outputPath = OutputFile.empty() 
-            ? getCurrentFile().str() + ".optimized" 
-            : OutputFile;
+        std::string outputPath;
+        if (!OutputFile.empty()) {
+            outputPath = OutputFile;
+        } else if (!OutputDir.empty()) {
+            llvm::SmallString<256> outputPathBuf(OutputDir);
+            llvm::sys::path::append(outputPathBuf, llvm::sys::path::filename(getCurrentFile()));
+            outputPathBuf += ".optimized";
+            outputPath = outputPathBuf.str().str();
+
+            llvm::SmallString<256> parentDir(outputPathBuf);
+            llvm::sys::path::remove_filename(parentDir);
+            if (!parentDir.empty()) {
+                std::error_code dirEc = llvm::sys::fs::create_directories(parentDir);
+                if (dirEc) {
+                    llvm::errs() << "Error creating output directory: " << dirEc.message() << "\n";
+                    return;
+                }
+            }
+        } else {
+            outputPath = getCurrentFile().str() + ".optimized";
+        }
         
         // Write the transformed code
         std::error_code EC;
@@ -107,8 +130,19 @@ int main(int argc, const char** argv) {
     }
     
     CommonOptionsParser& OptionsParser = ExpectedParser.get();
+    const auto& sourcePaths = OptionsParser.getSourcePathList();
+    if (!OutputFile.empty() && !OutputDir.empty()) {
+        llvm::errs() << "Error: -o and --out-dir cannot be used together.\n";
+        return 1;
+    }
+    if (!OutputFile.empty() && sourcePaths.size() != 1) {
+        llvm::errs() << "Error: -o is only supported with a single input file. "
+                        "Use --out-dir for multiple files.\n";
+        return 1;
+    }
+
     ClangTool Tool(OptionsParser.getCompilations(), 
-                   OptionsParser.getSourcePathList());
+                   sourcePaths);
     
     return Tool.run(newFrontendActionFactory<MoveOptimizerAction>().get());
 }
